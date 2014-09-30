@@ -5,7 +5,8 @@ PGM=`basename $0`
 RSYNC_OPTIONS="--force -rltWDEgopt"
 
 # List of extra dirs to create under /mnt.
-OPTIONAL_MNT_DIRS="clone mnt sda sdb rpi0 rpi1"
+#OPTIONAL_MNT_DIRS="clone mnt sda sdb rpi0 rpi1"
+OPTIONAL_MNT_DIRS="clone"
 
 # Where to mount the disk filesystems to be rsynced.
 CLONE=/mnt/clone
@@ -25,7 +26,7 @@ fi
 
 if ! rsync --version > /dev/null
 then
-	echo -e "\nOoops! rpi-clone needs the rsync program but cannot run it."
+	echo -e "\nOoops! $PGM needs the rsync program but cannot run it."
 	echo "Make sure rsync is installed:"
 	echo "    $ sudo apt-get update"
 	echo -e "    $ sudo apt-get install rsync\n"
@@ -335,10 +336,19 @@ fi
 # =========== End of Setup  ===========
 
 
-
+# check if the boot partition is mounted before running rsync
+BOOT_MOUNT=`fgrep " /boot " /etc/mtab | cut -f 1 -d ' ' `
+if [ "$BOOT_MOUNT" = "" ]
+	echo "Mounting /dev/mmcblk0p1 on /boot"
+	if ! mount /dev/mmcblk0p1 /boot
+	then
+		echo -e "Mount failure of /boot/, aborting!\n"
+		exit 0
+	fi
+	echo "ok"
+fi
 
 # Mount destination filesystems.
-
 echo "=> Mounting $DST_ROOT_PARTITION ($DST_ROOT_VOL_NAME) on $CLONE"
 if ! mount $DST_ROOT_PARTITION $CLONE
 then
@@ -413,7 +423,8 @@ do
 	fi
 done
 
-rm -f $CLONE/etc/udev/rules.d/70-persistent-net.rules
+
+#rm -f $CLONE/etc/udev/rules.d/70-persistent-net.rules
 
 
 DATE=`date '+%F %H:%M'`
