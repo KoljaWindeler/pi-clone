@@ -336,16 +336,15 @@ fi
 # =========== End of Setup  ===========
 
 
-# check if the boot partition is mounted before running rsync
+# ensure that the boot partition is mounted before running rsync
 BOOT_MOUNT=`fgrep " /boot " /etc/mtab | cut -f 1 -d ' ' `
 if [ "$BOOT_MOUNT" = "" ]
-	echo "Mounting /dev/mmcblk0p1 on /boot"
+	echo "=> Mounting /dev/mmcblk0p1 on /boot"
 	if ! mount /dev/mmcblk0p1 /boot
 	then
-		echo -e "Mount failure of /boot/, aborting!\n"
+		echo -e "Mount failure on /boot/, aborting!\n"
 		exit 0
 	fi
-	echo "ok"
 fi
 
 # Mount destination filesystems.
