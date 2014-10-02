@@ -115,6 +115,7 @@ do
                         ;;
                 -y|--yes-to-all)
                         NO_REQUEST=true
+                        ;;
                 *)
                         if [ "$DST_DISK" != "" ]
                         then
