@@ -475,7 +475,7 @@ fi
 # mount the root filesystem if we are using the restore mode
 if [ "$RESTORE_MODE" = "1" ]
 then
-        echo "=> Mounting /dev/${SRC_DISK}${PARTITION_SPACER}2 on ${SRC_ROOT_PATH}"
+        echo "=> Mounting /dev/${SRC_DISK}${PARTITION_SPACER}2 ($SRC_ROOT_VOL_NAME) on ${SRC_ROOT_PATH}"
  
         if ! mount /dev/${SRC_DISK}${PARTITION_SPACER}2 ${SRC_ROOT_PATH}
         then
