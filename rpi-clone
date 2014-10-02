@@ -1,29 +1,41 @@
 #!/bin/bash
 
 PGM=`basename $0`
-
 RSYNC_OPTIONS="--force -rltWDEgopt"
+#-r recursive
+#-l copy symlinks as symlinks
+#-t  preserve modification time
+#-W copy whole files
+#-D
+#-E preserve file executability
+#-g preserve group
+#-o preserve owner
+#-p preerve permission
+#-t preserver times
+
 
 # List of extra dirs to create under /mnt.
 #OPTIONAL_MNT_DIRS="clone mnt sda sdb rpi0 rpi1"
 OPTIONAL_MNT_DIRS="clone"
 
 # Where to mount the disk filesystems to be rsynced.
-CLONE=/mnt/clone
+DEST_ROOT_PATH=/mnt/clone
+SRC_ROOT_PATH=/mnt/source
 
 CLONE_LOG=/var/log/$PGM.log
 
 HOSTNAME=`hostname`
+# e.g. mmcblk0->p<-1, we dont need that in sdb-><-1 ...
+PARTITION_SPACER="p"
 
-SRC_BOOT_PARTITION_TYPE=`parted /dev/mmcblk0 -ms p | grep "^1" | cut -f 5 -d:`
-SRC_ROOT_PARTITION_TYPE=`parted /dev/mmcblk0 -ms p | grep "^2" | cut -f 5 -d:`
-
+# check if we are root
 if [ `id -u` != 0 ]
 then
     echo -e "$PGM needs to be run as root.\n"
     exit 1
 fi
 
+# check if we have rsync installed
 if ! rsync --version > /dev/null
 then
 	echo -e "\nOoops! $PGM needs the rsync program but cannot run it."
@@ -73,7 +85,7 @@ usage()
 	echo "    The SD card  partitions are then mounted and rsynced to the"
 	echo "    running system."
 	echo ""
-	echo "    The SD card destination partitions will be mounted on $CLONE."
+	echo "    The SD card destination partitions will be mounted on $DEST_ROOT_PATH."
 	echo "    A log will be written to $CLONE_LOG."
 	echo "    Avoid running other disk writing programs when running $PGM."
 	echo ""
@@ -81,6 +93,7 @@ usage()
 	}
 
 VERBOSE=off
+RESTORE_MODE=0
 
 while [ "$1" ]
 do
@@ -98,8 +111,14 @@ do
 		*)
 			if [ "$DST_DISK" != "" ]
 			then
-				echo "Bad args"
-				usage
+				if [ "$SRC_DISK" != "" ]
+				then
+					echo "Bad args"
+					usage
+				fi
+				SRC_DISK=$DST_DISK
+				RESTORE_MODE=1
+				PARTITION_SPACER=""
 			fi
 			DST_DISK=$1
 			;;
@@ -107,12 +126,20 @@ do
 	shift
 done
 
+if [ "$SRC_DISK" = "" ]
+then
+	SRC_DISK=mmcblk0
+fi
+
+SRC_BOOT_PARTITION_TYPE=`parted /dev/$SRC_DISK -ms p | grep "^1" | cut -f 5 -d:`
+SRC_ROOT_PARTITION_TYPE=`parted /dev/$SRC_DISK -ms p | grep "^2" | cut -f 5 -d:`
 
 if [ "$DST_DISK" = "" ]
 then
 	usage
 	exit 0
 fi
+
 
 if ! cat /proc/partitions | grep -q $DST_DISK
 then
@@ -121,6 +148,18 @@ then
 	echo "If it does not show up  as '$DST_DISK', then do a"
 	echo -e "'cat /proc/partitions' to see where it might be.\n"
 	exit 0
+fi
+
+if [ "$RESTORE_MODE" = "1" ]
+then
+	if ! cat /proc/partitions | grep -q $SRC_DISK
+	then
+	        echo "Source disk '$SRC_DISK' does not exist."
+	        echo "Plug the destination SD card into a USB port."
+	        echo "If it does not show up  as '$SRC_DISK', then do a"
+	        echo -e "'cat /proc/partitions' to see where it might be.\n"
+        	exit 0
+	fi
 fi
 
 unmount_or_abort()
@@ -144,7 +183,11 @@ unmount_or_abort()
 DST_ROOT_PARTITION=/dev/${DST_DISK}2
 DST_BOOT_PARTITION=/dev/${DST_DISK}1
 
+SRC_ROOT_PARTITION=/dev/${SRC_DISK}${PARTITION_SPACER}2
+SRC_BOOT_PARTITION=/dev/${SRC_DISK}${PARTITION_SPACER}1
+
 # Check that none of the destination partitions are busy (mounted).
+# src partitions can be mounted as we are just reading from them
 #
 DST_ROOT_CURMOUNT=`fgrep "$DST_ROOT_PARTITION " /etc/mtab | cut -f 2 -d ' ' `
 DST_BOOT_CURMOUNT=`fgrep "$DST_BOOT_PARTITION " /etc/mtab | cut -f 2 -d ' ' `
@@ -164,34 +207,56 @@ then
 	fi
 fi
 
-
-TEST_MOUNTED=`fgrep " $CLONE " /etc/mtab | cut -f 1 -d ' ' `
+# check that no other drive is mounted on our mountpoint for destination
+TEST_MOUNTED=`fgrep " $DEST_ROOT_PATH " /etc/mtab | cut -f 1 -d ' ' `
 if [ "$TEST_MOUNTED" != "" ]
 then
-	echo "This script uses $CLONE for mounting filesystems, but"
-	echo "$CLONE is already mounted with $TEST_MOUNTED."
-	unmount_or_abort $CLONE 
+	echo "This script uses $DEST_ROOT_PATH for mounting filesystems, but"
+	echo "$DEST_ROOT_PATH is already mounted with $TEST_MOUNTED."
+	unmount_or_abort $DEST_ROOT_PATH 
 fi
 
-if [ ! -d $CLONE ]
+# check that no other drive is mounted on our mountpoint for source
+if [ "$RESTORE_MODE" = "1" ]
 then
-	MNT_MOUNT=`fgrep " /mnt " /etc/mtab | cut -f 1 -d ' ' `
-	if [ "$MNT_MOUNT" = "" ]
+	TEST_MOUNTED=`fgrep " $SRC_ROOT_PATH " /etc/mtab | cut -f 1 -d ' ' `
+	if [ "$TEST_MOUNTED" != "" ]
 	then
-		mkdir $CLONE
-	else
-		echo "$MNT_MOUNT is currently mounted on /mnt."
-		unmount_or_abort /mnt
-		mkdir $CLONE
+	        echo "This script uses $SRC_ROOT_PATH for mounting filesystems, but"
+        	echo "$SRC_ROOT_PATH is already mounted with $TEST_MOUNTED."
+	        unmount_or_abort $SRC_ROOT_PATH
 	fi
 fi
+
+# check that /mnt is not mounted on another drive
+if [ ! -d $DEST_ROOT_PATH ]
+then
+	MNT_MOUNT=`fgrep " /mnt " /etc/mtab | cut -f 1 -d ' ' `
+	if [ "$MNT_MOUNT" != "" ]
+	then
+		echo "$MNT_MOUNT is currently mounted on /mnt."
+		unmount_or_abort /mnt
+	fi
+
+	mkdir $DEST_ROOT_PATH
+fi
+
+if [ "$RESTORE_MODE" = "1" ]
+then
+	if [ ! -d $SRC_ROOT_PATH ]
+	then
+		mkdir $SRC_ROOT_PATH
+	fi
+fi
+
+
 
 
 # Borrowed from do_expand_rootfs in raspi-config
 expand_rootfs()
 	{
 	# Get the starting offset of the root partition
-	PART_START=$(parted /dev/mmcblk0 -ms unit s p | grep "^2" | cut -f 2 -d:)
+	PART_START=$(parted /dev/$SRC_DISK -ms unit s p | grep "^2" | cut -f 2 -d:)
 	[ "$PART_START" ] || return 1
 	# Return value will likely be error for fdisk as it fails to reload the
 	# partition table because the root fs is mounted
@@ -244,7 +309,7 @@ then
 		echo -e "  ... Cannot find a destination root file system of type: $SRC_ROOT_PARTITION_TYPE\n"
 	fi
 	echo "This script can initialize the destination disk with a partition"
-	echo "structure copied from the currently booted filesytem and then resize"
+	echo "structure copied from the source filesytem and then resize"
 	echo "partition 2 (the root filesystem) to use all space on the SD card."
 	echo -n "Do you want to initialize the destination /dev/$DST_DISK? (yes/no): "
 	read resp
@@ -255,7 +320,7 @@ then
 		# the start of partition 2.
 		#
 		# Calculate the start of partition 2 in MB for the dd.
-		PART2_START=$(parted /dev/mmcblk0 -ms unit MB p | grep "^2" \
+		PART2_START=$(parted /dev/$SRC_DISK -ms unit MB p | grep "^2" \
 				| cut -f 2 -d: | sed s/MB// | tr "," "." | cut -f 1 -d.)
 		# and add some slop
 		DD_COUNT=`expr $PART2_START + 8`
@@ -263,7 +328,7 @@ then
 		echo ""
 		echo "Imaging the partition structure, copying $DD_COUNT megabytes..."
 		sync
-		dd if=/dev/mmcblk0 of=/dev/$DST_DISK bs=1M count=$DD_COUNT
+		dd if=/dev/$SRC_DISK of=/dev/$DST_DISK bs=1M count=$DD_COUNT
 
 		# Partition was copied live so fsck to clean up for possible future
 		# "Volume was not properly unmounted" warnings.
@@ -287,9 +352,10 @@ then
 		parted /dev/$DST_DISK unit MB p \
 			| sed "/^Model/d ; /^Sector/d"
 
-		SRC_ROOT_VOL_NAME=`e2label /dev/mmcblk0p2`
+		SRC_ROOT_VOL_NAME=`e2label /dev/${SRC_DISK}${PARTITION_SPACER}2`
+
 		echo ""
-		echo "Your booted /dev/mmcblk0p2 rootfs existing label: $SRC_ROOT_VOL_NAME"
+		echo "Your booted /dev/${SRC_DISK}${PARTITION_SPACER}2 rootfs existing label: $SRC_ROOT_VOL_NAME"
 		echo -n "You may enter a label for the destination rootfs $DST_ROOT_PARTITION: "
 		read resp
 		if [ "$resp" != "" ]
@@ -306,16 +372,33 @@ fi
 # =========== Setup Summary ===========
 #
 DST_ROOT_VOL_NAME=`e2label $DST_ROOT_PARTITION`
+SRC_ROOT_VOL_NAME=`e2label $SRC_ROOT_PARTITION`
+
 
 if [ "$DST_ROOT_VOL_NAME" = "" ]
 then
 	DST_ROOT_VOL_NAME="no label"
 fi
 
+if [ "$SRC_ROOT_VOL_NAME" = "" ]
+then
+        SRC_ROOT_VOL_NAME="no label"
+fi
+
+
 echo ""
+if [ "$RESTORE_MODE" = "1" ]
+then
+	echo "Restore mode             :  yes"
+	echo "Source disk              :  $SRC_DISK"
+	echo "Source bootfs            :  $SRC_BOOT_PARTITION on ${SRC_ROOT_PATH}/boot"
+	echo "Source rootfs            :  $SRC_ROOT_PARTITION ($SRC_ROOT_VOL_NAME) on ${SRC_ROOT_PATH}"
+else 
+	echo "Restore mode             :  no"
+fi
 echo "Clone destination disk   :  $DST_DISK"
-echo "Clone destination rootfs :  $DST_ROOT_PARTITION ($DST_ROOT_VOL_NAME) on ${CLONE}"
-echo "Clone destination bootfs :  $DST_BOOT_PARTITION on ${CLONE}/boot"
+echo "Clone destination bootfs :  $DST_BOOT_PARTITION on ${DEST_ROOT_PATH}/boot"
+echo "Clone destination rootfs :  $DST_ROOT_PARTITION ($DST_ROOT_VOL_NAME) on ${DEST_ROOT_PATH}"
 echo "Verbose mode             :  $VERBOSE"
 
 echo "==============================="
@@ -335,35 +418,71 @@ fi
 #
 # =========== End of Setup  ===========
 
+# mount the root filesystem if we are using the restore mode
+if [ "$RESTORE_MODE" = "1" ]
+then
+	SRC_ROOT_MOUNT=`fgrep " ${SRC_ROOT_PATH} " /etc/mtab | cut -f 1 -d ' ' `
+	if [ "$SRC_ROOT_MOUNT" = "" ]
+        	then
+	        echo "=> Mounting /dev/${SRC_DISK}${PARTITION_SPACER}2 on ${SRC_ROOT_PATH}"
+        	if [ ! -d ${SRC_ROOT_PATH} ]
+	        then
+        	        mkdir -p ${SRC_ROOT_PATH}
+	        fi
+
+        	if ! mount /dev/${SRC_DISK}${PARTITION_SPACER}2 ${SRC_ROOT_PATH}
+	        then
+                	echo -e "Mount failure on ${SRC_ROOT_PATH}, aborting!\n"
+        	        exit 0
+	        fi
+	fi
+fi
 
 # ensure that the boot partition is mounted before running rsync
-BOOT_MOUNT=`fgrep " /boot " /etc/mtab | cut -f 1 -d ' ' `
+SRC_BOOT_PATH="/boot"
+if [ "$RESTORE_MODE" = "1" ]
+then
+        SRC_BOOT_PATH="${SRC_ROOT_PATH}/boot"
+        if [ ! -d ${BOOT_PATH} ]
+        then
+                mkdir ${BOOT_PATH}
+        fi
+fi
+
+BOOT_MOUNT=`fgrep " ${SRC_BOOT_PATH} " /etc/mtab | cut -f 1 -d ' ' `
 if [ "$BOOT_MOUNT" = "" ]
-	echo "=> Mounting /dev/mmcblk0p1 on /boot"
-	if ! mount /dev/mmcblk0p1 /boot
 	then
-		echo -e "Mount failure on /boot/, aborting!\n"
+	echo "=> Mounting /dev/${SRC_DISK}${PARTITION_SPACER}1 on ${SRC_BOOT_PATH}"
+	if [ ! -d ${SRC_BOOT_PATH} ]
+	then
+	        mkdir -p ${SRC_BOOT_PATH}
+	fi
+
+	if ! mount /dev/${SRC_DISK}${PARTITION_SPACER}1 ${SRC_BOOT_PATH}
+	then
+		echo -e "Mount failure on ${SRC_BOOT_PATH}, aborting!\n"
 		exit 0
 	fi
 fi
 
 # Mount destination filesystems.
-echo "=> Mounting $DST_ROOT_PARTITION ($DST_ROOT_VOL_NAME) on $CLONE"
-if ! mount $DST_ROOT_PARTITION $CLONE
+echo "=> Mounting $DST_ROOT_PARTITION ($DST_ROOT_VOL_NAME) on $DEST_ROOT_PATH"
+if ! mount $DST_ROOT_PARTITION $DEST_ROOT_PATH
 then
 	echo -e "Mount failure of $DST_ROOT_PARTITION, aborting!\n"
 	exit 0
 fi
 
-if [ ! -d $CLONE/boot ]
+if [ ! -d $DEST_ROOT_PATH/boot ]
+
 then
-	mkdir $CLONE/boot
+        mkdir -p $DEST_ROOT_PATH/boot
 fi
 
-echo "=> Mounting $DST_BOOT_PARTITION on $CLONE/boot"
-if ! mount $DST_BOOT_PARTITION $CLONE/boot
+echo "=> Mounting $DST_BOOT_PARTITION on $DEST_ROOT_PATH/boot"
+if ! mount $DST_BOOT_PARTITION $DEST_ROOT_PATH/boot
 then
-	umount $CLONE
+	umount $DEST_ROOT_PATH
 	echo -e "Mount failure of $DST_BOOT_PARTITION, aborting!\n"
 	exit 0
 fi
@@ -379,21 +498,28 @@ START_TIME=`date '+%H:%M:%S'`
 # file systems from the rsync.
 #
 sync
-echo "Starting the filesystem rsync to $DST_DISK"
-echo -n "(This may take several minutes)..."
-rsync $RSYNC_OPTIONS --delete \
-		--exclude '.gvfs' \
-		--exclude '/dev' \
-		--exclude '/media' \
-		--exclude '/mnt' \
-		--exclude '/proc' \
-		--exclude '/run' \
-		--exclude '/sys' \
-		--exclude '/tmp' \
-		--exclude 'lost\+found' \
-	// \
-	$CLONE
 
+RSYNC_SRC_PATH="/"
+if [ "$RESTORE_MODE" = "1" ]
+then
+	RSYNC_SRC_PATH="${SRC_ROOT_PATH}/"
+fi
+
+echo "Starting the filesystem rsync ${RSYNC_SRC_PATH} to $DEST_ROOT_PATH"
+echo -n "(This may take several minutes)..."
+
+rsync $RSYNC_OPTIONS --delete \
+                --exclude '.gvfs' \
+                --exclude ${RSYNC_SRC_PATH}'dev' \
+                --exclude ${RSYNC_SRC_PATH}'media' \
+                --exclude ${RSYNC_SRC_PATH}'mnt' \
+                --exclude ${RSYNC_SRC_PATH}'proc' \
+                --exclude ${RSYNC_SRC_PATH}'run' \
+                --exclude ${RSYNC_SRC_PATH}'sys' \
+                --exclude ${RSYNC_SRC_PATH}'tmp' \
+                --exclude ${RSYNC_SRC_PATH}'lost\+found' \
+        $RSYNC_SRC_PATH \
+        $DEST_ROOT_PATH
 
 
 # Fixup some stuff
@@ -401,29 +527,29 @@ rsync $RSYNC_OPTIONS --delete \
 
 for i in dev media mnt proc run sys
 do
-	if [ ! -d $CLONE/$i ]
+	if [ ! -d $DEST_ROOT_PATH/$i ]
 	then
-		mkdir $CLONE/$i
+		mkdir $DEST_ROOT_PATH/$i
 	fi
 done
 
-if [ ! -d $CLONE/tmp ]
+if [ ! -d $DEST_ROOT_PATH/tmp ]
 then
-	mkdir $CLONE/tmp
-	chmod a+w $CLONE/tmp
+	mkdir $DEST_ROOT_PATH/tmp
+	chmod a+w $DEST_ROOT_PATH/tmp
 fi
 
 # Some extra optional dirs I create under /mnt
 for i in $OPTIONAL_MNT_DIRS
 do
-	if [ ! -d $CLONE/mnt/$i ]
+	if [ ! -d $DEST_ROOT_PATH/mnt/$i ]
 	then
-		mkdir $CLONE/mnt/$i
+		mkdir $DEST_ROOT_PATH/mnt/$i
 	fi
 done
 
 
-#rm -f $CLONE/etc/udev/rules.d/70-persistent-net.rules
+#rm -f $DEST_ROOT_PATH/etc/udev/rules.d/70-persistent-net.rules
 
 
 DATE=`date '+%F %H:%M'`
@@ -431,7 +557,7 @@ DATE=`date '+%F %H:%M'`
 echo "$DATE  $HOSTNAME $PGM : clone to $DST_DISK ($DST_ROOT_VOL_NAME)" \
 		>> $CLONE_LOG
 echo "$DATE  $HOSTNAME $PGM : clone to $DST_DISK ($DST_ROOT_VOL_NAME)" \
-		>> $CLONE/$CLONE_LOG
+		>> $DEST_ROOT_PATH/$CLONE_LOG
 
 
 STOP_TIME=`date '+%H:%M:%S'`
@@ -443,18 +569,26 @@ echo ""
 
 # Pause before unmounting in case I want to inspect the clone results
 # or need to custom modify any files on the destination SD clone.
-# Eg. modify $CLONE/etc/hostname, $CLONE/etc/network/interfaces, etc
+# Eg. modify $DEST_ROOT_PATH/etc/hostname, $DEST_ROOT_PATH/etc/network/interfaces, etc
 # if I'm cloning into a card to be installed on another Pi.
 #
-echo -n "Hit Enter when ready to unmount the /dev/$DST_DISK partitions..."
+echo -n "Hit Enter when ready to unmount the used partitions..."
 read resp
 
-echo "unmounting $CLONE/boot"
-umount $CLONE/boot
+echo "unmounting $DEST_ROOT_PATH/boot"
+umount $DEST_ROOT_PATH/boot
 
-echo "unmounting $CLONE"
-umount $CLONE
+echo "unmounting $DEST_ROOT_PATH"
+umount $DEST_ROOT_PATH
 
+if [ "$RESTORE_MODE" = "1" ]
+then
+	echo "unmounting $SRC_ROOT_PATH/boot"
+	umount $SRC_ROOT_PATH/boot
+
+	echo "unmounting $SRC_ROOT_PATH"
+	umount $SRC_ROOT_PATH
+fi
 
 echo "==============================="
 
