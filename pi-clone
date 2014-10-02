@@ -307,10 +307,15 @@ DST_BOOT_PARTITION_TYPE=`parted /dev/$DST_DISK -ms p \
                 | grep "^1" | cut -f 5 -d:`
 DST_ROOT_PARTITION_TYPE=`parted /dev/$DST_DISK -ms p \
                 | grep "^2" | cut -f 5 -d:`
- 
+SRC_BOOT_PARTITION_SIZE=`parted /dev/$SRC_DISK -ms p \
+                | grep "^1" | cut -f 3 -d:`
+DST_BOOT_PARTITION_SIZE=`parted /dev/$DST_DISK -ms p \
+                | grep "^1" | cut -f 3 -d:`
+
  
 if [ "$DST_BOOT_PARTITION_TYPE" != "$SRC_BOOT_PARTITION_TYPE" ] || \
    [ "$DST_ROOT_PARTITION_TYPE" != "$SRC_ROOT_PARTITION_TYPE" ] || \
+   [ "$SRC_BOOT_PARTITION_SIZE" != "$DST_BOOT_PARTITION_SIZE" ] || \
    [ "$FORCE_INITIALIZE" = "true" ]
 then
         echo ""
@@ -330,6 +335,11 @@ then
         if [ "$DST_ROOT_PARTITION_TYPE" != "$SRC_ROOT_PARTITION_TYPE" ]
         then
                 echo -e "  ... Cannot find a destination root file system of type: $SRC_ROOT_PARTITION_TYPE\n"
+        fi
+        if [ "$SRC_BOOT_PARTITION_SIZE" != "$DST_BOOT_PARTITION_SIZE" ]
+        then
+                echo " ... The boot partitions have different sizes." 
+                echo "    Required $SRC_BOOT_PARTITION_SIZE vs $DST_BOOT_PARTITION_SIZE available on $DST_DISK"
         fi
         echo "This script can initialize the destination disk with a partition"
         echo "structure copied from the source filesytem and then resize"
