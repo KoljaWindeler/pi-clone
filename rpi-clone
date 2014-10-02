@@ -4,7 +4,7 @@ PGM=`basename $0`
 RSYNC_OPTIONS="--force -rltWDEgopt"
 #-r recursive
 #-l copy symlinks as symlinks
-#-t  preserve modification time
+#-t preserve modification time
 #-W copy whole files
 #-D
 #-E preserve file executability
@@ -59,27 +59,31 @@ fi
 usage()
         {
         echo ""
-        echo "usage: $PGM sdN {-f|--force-initialize} {-v|--verbose}"
-        echo "    Example:  $PGM sda"
+        echo "usage: $PGM sdN sdM {-f|--force-initialize} {-v|--verbose} {-y|--yes-to-all}"
+        echo "    Example:  $PGM sda to clone the current running system from /dev/mmcblk0"
+        echo "    Example:  $PGM sda sdb to restore the system from /dev/sda to /dev/sdb"
         echo "    -v - list all files as they are copied."
         echo "    -f - force initialize the destination partitions"
+        echo "    -y - skip all questions"
         echo ""
-        echo "    Clone (rsync) a running Raspberry Pi file system to a destination"
-        echo "    SD card 'sdN' plugged into a Pi USB port (via a USB card reader)."
-        echo "    $PGM can clone the running system to a new SD card or can"
-        echo "    incrementally rsync to existing backup Raspberry Pi SD cards."
+        echo "    $PGM can run in two ways"
+        echo "    1) $PGM sdN (without sdM) will cloning your current running system to a SD card installed on sdN"
+        echo "    2) $PGM sdN sdM will clone the system on disk sdN to the disk sdM"
+        echo ""
+        echo "    $PGM can clone the system to a new SD card or can"
+        echo "    incrementally rsync to existing backup Raspberry/Banana Pi SD cards."
         echo ""
         echo "    If the destination SD card has an existing $SRC_BOOT_PARTITION_TYPE partition 1 and a"
         echo "    $SRC_ROOT_PARTITION_TYPE partition 2, $PGM assumes (unless using the -f option)"
         echo "    that the SD card is an existing backup with the partitions"
-        echo "    properly sized and set up for a Raspberry Pi.  All that is needed"
-        echo "    is to mount the partitions and rsync them to the running system."
+        echo "    properly sized and set up for a Raspberry/Banana Pi.  All that is needed"
+        echo "    is to mount the partitions and rsync them to the source system."
         echo ""
         echo "    If these partitions are not found (or -f), then $PGM will ask"
         echo "    if it is OK to initialize the destination SD card partitions."
-        echo "    This is done by a partial 'dd' from the running booted device"
-        echo "    /dev/mmcblk0 to the destination SD card /dev/sdN followed by a"
-        echo "    fdisk resize and mkfs.ext4 of /dev/sdN partition 2."
+        echo "    This is done by a partial 'dd' from the source device /dev/mmcblk0"
+        echo "    or /dev/sdN to the destination SD card followed by a"
+        echo "    fdisk resize and mkfs.ext4 of partition 2."
         echo "    This creates a completed $SRC_BOOT_PARTITION_TYPE partition 1 containing all boot"
         echo "    files and an empty but properly sized partition 2 rootfs."
         echo "    The SD card  partitions are then mounted and rsynced to the"
@@ -94,6 +98,7 @@ usage()
  
 VERBOSE=off
 RESTORE_MODE=0
+NO_REQUEST=false
  
 while [ "$1" ]
 do
@@ -108,6 +113,8 @@ do
                 -h|--help)
                         usage
                         ;;
+                -y|--yes-to-all)
+                        NO_REQUEST=true
                 *)
                         if [ "$DST_DISK" != "" ]
                         then
@@ -165,7 +172,13 @@ fi
 unmount_or_abort()
         {
         echo -n "Do you want to unmount $1? (yes/no): "
-        read resp
+        if [ "$NO_REQUEST" = "true" ]
+        then
+         resp="y"
+         echo "yes"
+        else
+         read resp
+        fi
         if [ "$resp" = "y" ] || [ "$resp" = "yes" ]
         then
                 if ! umount $1
@@ -321,7 +334,13 @@ then
         echo "structure copied from the source filesytem and then resize"
         echo "partition 2 (the root filesystem) to use all space on the SD card."
         echo -n "Do you want to initialize the destination /dev/$DST_DISK? (yes/no): "
-        read resp
+        if [ "$NO_REQUEST" = "true" ]
+        then
+         resp="y"
+         echo "yes"
+        else
+         read resp
+        fi
         if [ "$resp" = "y" ] || [ "$resp" = "yes" ]
         then
                 # Image onto the destination disk a beginning fragment of the
@@ -366,7 +385,13 @@ then
                 echo ""
                 echo "Your booted /dev/${SRC_DISK}${PARTITION_SPACER}2 rootfs existing label: $SRC_ROOT_VOL_NAME"
                 echo -n "You may enter a label for the destination rootfs $DST_ROOT_PARTITION: "
-                read resp
+                if [ "$NO_REQUEST" = "true" ]
+                then
+                 resp=""
+                 echo "skipped"
+                else
+                 read resp
+                fi
                 if [ "$resp" != "" ]
                 then
                         e2label $DST_ROOT_PARTITION $resp
@@ -417,7 +442,13 @@ echo "==============================="
 # in another terminal with:  watch df -h
 #
 echo -n "Final check, is it Ok to proceed with the clone (yes/no)?: "
-read resp
+if [ "$NO_REQUEST" = "true" ]
+then
+ resp="y"
+ echo "yes"
+else
+ read resp
+fi
 if [ "$resp" != "y" ] && [ "$resp" != "yes" ]
 then
         echo -e "Aborting the disk clone.\n"
@@ -573,7 +604,12 @@ echo ""
 # if I'm cloning into a card to be installed on another Pi.
 #
 echo -n "Hit Enter when ready to unmount the used partitions..."
-read resp
+if [ "$NO_REQUEST" = "true" ]
+then
+ echo "skipped"
+else
+ read resp
+fi
  
 echo "unmounting $DEST_ROOT_PATH/boot"
 umount $DEST_ROOT_PATH/boot
