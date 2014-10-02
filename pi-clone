@@ -330,16 +330,19 @@ then
                 | sed "/^Model/d ; /^Sector/d"
         if [ "$DST_BOOT_PARTITION_TYPE" != "$SRC_BOOT_PARTITION_TYPE" ]
         then
-                echo -e "  ... Cannot find a destination boot file system of type: $SRC_BOOT_PARTITION_TYPE\n"
+                echo "  ... Cannot find a destination boot file system of type: $SRC_BOOT_PARTITION_TYPE"
+                echo ""
         fi
         if [ "$DST_ROOT_PARTITION_TYPE" != "$SRC_ROOT_PARTITION_TYPE" ]
         then
-                echo -e "  ... Cannot find a destination root file system of type: $SRC_ROOT_PARTITION_TYPE\n"
+                echo "  ... Cannot find a destination root file system of type: $SRC_ROOT_PARTITION_TYPE"
+                echo ""
         fi
         if [ "$SRC_BOOT_PARTITION_SIZE" != "$DST_BOOT_PARTITION_SIZE" ]
         then
                 echo " ... The boot partitions have different sizes." 
-                echo "    Required $SRC_BOOT_PARTITION_SIZE vs $DST_BOOT_PARTITION_SIZE available on $DST_DISK"
+                echo "     Required $SRC_BOOT_PARTITION_SIZE vs $DST_BOOT_PARTITION_SIZE available on $DST_DISK"
+                echo ""
         fi
         echo "This script can initialize the destination disk with a partition"
         echo "structure copied from the source filesytem and then resize"
